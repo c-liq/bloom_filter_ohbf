@@ -1,12 +1,65 @@
 #include "bloom.h"
 
-static inline int bloom_calc_partitions(bloom_s *bf, long target_size, long k, primes_s *primes);
+typedef struct prime_table {
+  uint64_t count;
+  uint64_t *primes;
+} prime_table;
+
+static inline int bloom_calc_partitions(bloom *bf, long target_size, long k, prime_table *primes);
 
 static inline long binary_search_nearest(const uint64_t *elem_array, size_t num_elems, uint64_t value);
 
 static inline uint64_t unsigned_abs(uint64_t a, uint64_t b);
 
-static inline int bloom_calc_partitions(bloom_s *bf, long target_size, long k, primes_s *primes) {
+static inline int generate_primes(prime_table *primes, double max);
+
+static inline int generate_primes(prime_table *primes, double max) {
+    if (!primes || max < 2) {
+        return -1;
+    }
+
+    // This calculation guarantees an upper bound approximation, the actual number of primes will never be larger
+    uint64_t approx_count = (uint64_t) ceil((max / log(max) * (1 + (1.2762 / log(max)))));
+    uint64_t max_prime = (uint64_t) max + 1;
+    uint64_t *a = calloc(max_prime, sizeof(uint64_t));
+    if (!a) {
+        return -1;
+    }
+
+    uint64_t max_prime_root = (uint64_t) sqrt(max);
+    for (uint64_t i = 2; i <= max_prime_root; i++) {
+        if (!a[i]) {
+            for (uint64_t j = (i * i); j < max_prime; j += i) {
+                a[j] = 1;
+            }
+        }
+    }
+
+    uint64_t *prime_table = calloc(approx_count, sizeof(uint64_t));
+    if (!prime_table) {
+        free(a);
+        return -1;
+    }
+
+    uint64_t num_primes = 0;
+    for (uint64_t i = 2; i < max_prime; i++) {
+        if (!a[i]) {
+            prime_table[num_primes++] = i;
+        }
+    }
+    free(a);
+
+    primes->primes = realloc(prime_table, num_primes * sizeof(uint64_t));
+    if (!primes->primes) {
+        free(prime_table);
+        return -1;
+    }
+
+    primes->count = num_primes;
+    return 0;
+}
+
+static inline int bloom_calc_partitions(bloom *bf, long target_size, long k, prime_table *primes) {
     uint64_t avg_part_size = (uint64_t) ceil(target_size / k);
     long avg_index = binary_search_nearest(primes->primes, primes->count, avg_part_size);
     long sum = 0;
@@ -50,6 +103,7 @@ static inline int bloom_calc_partitions(bloom_s *bf, long target_size, long k, p
             return -1;
         }
         bf->bloom_ptr = bf->base_ptr + bf->prefix_len;
+        bf->alloced = true;
     }
 
     uint64_t offset_sum = 0;
@@ -105,7 +159,7 @@ static inline long binary_search_nearest(const uint64_t *elem_array, size_t num_
     return index;
 }
 
-uint64_t bloom_remaining_capacity(bloom_s *bf) {
+uint64_t bloom_remaining_capacity(bloom *bf) {
     if (!bf) {
         return 0;
     }
@@ -113,7 +167,7 @@ uint64_t bloom_remaining_capacity(bloom_s *bf) {
     return bf->capacity > bf->num_elems ? bf->capacity - bf->num_elems : 0;
 }
 
-int bloom_add_elem(bloom_s *bf, uint8_t *data, uint64_t data_len) {
+int bloom_add_elem(bloom *bf, uint8_t *data, uint64_t data_len) {
     if (!bf || !data || !data_len) {
         return -1;
     }
@@ -128,7 +182,7 @@ int bloom_add_elem(bloom_s *bf, uint8_t *data, uint64_t data_len) {
     return 0;
 }
 
-int bloom_lookup(bloom_s *bf, uint8_t *data, uint64_t data_len) {
+int bloom_test_elem(bloom *bf, uint8_t *data, uint64_t data_len) {
     if (!bf || !data || !data_len) {
         return -1;
     }
@@ -144,7 +198,7 @@ int bloom_lookup(bloom_s *bf, uint8_t *data, uint64_t data_len) {
     return 0;
 }
 
-int bloom_lookup_constant_time(bloom_s *bf, uint8_t *data, uint64_t data_len) {
+int bloom_lookup_constant_time(bloom *bf, uint8_t *data, uint64_t data_len) {
     if (!bf || !data || !data_len) {
         return -1;
     }
@@ -160,8 +214,8 @@ int bloom_lookup_constant_time(bloom_s *bf, uint8_t *data, uint64_t data_len) {
     return result;
 }
 
-bloom_s *bloom_alloc(double p, uint64_t n, uint8_t *bloom_data, uint64_t prefix_len) {
-    bloom_s *bf = calloc(1, sizeof *bf);
+bloom *bloom_alloc(double p, uint64_t n, uint8_t *bloom_data, uint64_t prefix_len) {
+    bloom *bf = calloc(1, sizeof *bf);
 
     if (bloom_init(bf, p, n, bloom_data, prefix_len)) {
         bloom_free(bf);
@@ -171,7 +225,7 @@ bloom_s *bloom_alloc(double p, uint64_t n, uint8_t *bloom_data, uint64_t prefix_
     return bf;
 }
 
-int bloom_init(bloom_s *bf, double p, uint64_t n, uint8_t *bloom_data, uint64_t prefix_len) {
+int bloom_init(bloom *bf, double p, uint64_t n, uint8_t *bloom_data, uint64_t prefix_len) {
     if (!bf || p <= 0.0 || n <= 0) {
         return -1;
     }
@@ -184,7 +238,7 @@ int bloom_init(bloom_s *bf, double p, uint64_t n, uint8_t *bloom_data, uint64_t 
         return -1;
     }
 
-    primes_s primes;
+    prime_table primes;
     if (generate_primes(&primes, (target_size / num_partitions) + 300)) {
         return -1;
     }
@@ -199,6 +253,7 @@ int bloom_init(bloom_s *bf, double p, uint64_t n, uint8_t *bloom_data, uint64_t 
     if (bloom_data) {
         bf->base_ptr = bloom_data;
         bf->bloom_ptr = bf->base_ptr + bf->prefix_len;
+        bf->alloced = false;
     }
 
     int res = bloom_calc_partitions(bf, (long) target_size, num_partitions, &primes);
@@ -206,7 +261,7 @@ int bloom_init(bloom_s *bf, double p, uint64_t n, uint8_t *bloom_data, uint64_t 
     return res;
 }
 
-void bloom_print(bloom_s *bf) {
+void bloom_print(bloom *bf) {
     printf("Bloomfilter stats\n--------\n");
     printf("Size: %ld bytes (% ld bits)\n", bf->size, bf->size * 8);
     printf("Capacity: %ld (%ld used)\n", bf->capacity, bf->num_elems);
@@ -219,13 +274,16 @@ void bloom_print(bloom_s *bf) {
     printf("%ld\n", bf->partition_lengths[bf->num_partitions - 1]);
 }
 
-void bloom_clear(bloom_s *bf) {
+void bloom_clear(bloom *bf) {
     if (!bf)
         return;
 
     free(bf->partition_ptrs);
     free(bf->partition_lengths);
-    free(bf->base_ptr);
+
+    if (bf->alloced) {
+        free(bf->base_ptr);
+    }
 
     bf->base_ptr = NULL;
     bf->bloom_ptr = NULL;
@@ -240,7 +298,7 @@ void bloom_clear(bloom_s *bf) {
     bf->num_elems = 0;
 }
 
-void bloom_free(bloom_s *bf) {
+void bloom_free(bloom *bf) {
     bloom_clear(bf);
     free(bf);
 }
