@@ -38,7 +38,7 @@ int test_bloom_add(bloom *bf, uint8_t *data_array, uint32_t elem_size, uint32_t 
 {
 	uint8_t *data_ptr = data_array;
 	for (uint32_t i = 0; i < num_elems; i++) {
-		bloom_add_elem(bf, data_ptr, elem_size);
+		bloom_add(bf, data_ptr, elem_size);
 		data_ptr += elem_size;
 	}
     return 0;
@@ -49,7 +49,7 @@ int test_bloom_lookup(bloom* bf, uint8_t* data_array, uint32_t elem_size, uint32
 	uint8_t *data_ptr = data_array;
 	long pos = 0;
 	for (uint32_t i = 0; i < num_elems; i++) {
-		pos += !bloom_test_elem(bf, data_ptr, elem_size);
+		pos += !bloom_test(bf, data_ptr, elem_size);
 		data_ptr += elem_size;
 	}
 	printf("Number of lookups on %s: %u | Positive: %ld | Pos rate: %f\n", msg, num_elems, pos, (double) pos / num_elems);

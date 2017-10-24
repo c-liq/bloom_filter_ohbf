@@ -62,19 +62,19 @@ This is an implementation of a particular variation of a bloom fillter called
  uint8_t *data = get_new_data();
  uint8_t *some_other_data = get_new_data();
  
- bloom_add_elem(&bf, data, data_elem_size);
+ bloom_add(&bf, data, data_elem_size);
  
  // always returns 0 as the element is in the set
- bloom_lookup(&bf, data, data_elem_size);
+ bloom_test(&bf, data, data_elem_size);
  
  // not in the set, so should return 1, but because of false positives
  // will return 0 with roughly 'p' probability
- bloom_lookup(&bf, some_other_data, data_elem_size);
+ bloom_test(&bf, some_other_data, data_elem_size);
  
  // check how much capacity is remaining in the filter.
  uint64_t remaining = bloom_remaining_capacity(&buf);
 ````
-The `bloom_add_elem` function does not check whether a filter is at full capacity, so it's important
+The `bloom_add` function does not check whether a filter is at full capacity, so it's important
 to ensure this does not happen as the user. Exceeding the capacity of a filter will dramatically increase
 the rate of false positives.
 ## Cleanup

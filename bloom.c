@@ -20,14 +20,14 @@ static inline int generate_primes(prime_table *primes, double max) {
 
     // This calculation guarantees an upper bound approximation, the actual number of primes will never be larger
     uint64_t approx_count = (uint64_t) ceil((max / log(max) * (1 + (1.2762 / log(max)))));
-    uint64_t max_prime = (uint64_t) max + 1;
-    uint64_t *a = calloc(max_prime, sizeof(uint64_t));
+    uint64_t max_prime = (uint64_t) max;
+    uint64_t *a = calloc(max_prime, sizeof *a);
     if (!a) {
         return -1;
     }
 
-    uint64_t max_prime_root = (uint64_t) sqrt(max);
-    for (uint64_t i = 2; i <= max_prime_root; i++) {
+    uint64_t sqrt_max = (uint64_t) sqrt(max);
+    for (uint64_t i = 2; i <= sqrt_max; i++) {
         if (!a[i]) {
             for (uint64_t j = (i * i); j < max_prime; j += i) {
                 a[j] = 1;
@@ -49,7 +49,7 @@ static inline int generate_primes(prime_table *primes, double max) {
     }
     free(a);
 
-    primes->primes = realloc(prime_table, num_primes * sizeof(uint64_t));
+    primes->primes = realloc(prime_table, num_primes * sizeof *primes->primes);
     if (!primes->primes) {
         free(prime_table);
         return -1;
@@ -84,7 +84,7 @@ static inline int bloom_calc_partitions(bloom *bf, long target_size, long k, pri
         lowest_index++;
     }
 
-    uint64_t *part_lengths_bytes = malloc(sizeof(uint64_t) * k);
+    uint64_t *part_lengths_bytes = calloc(k, sizeof *part_lengths_bytes);
     if (!part_lengths_bytes) {
         return -1;
     }
@@ -167,7 +167,7 @@ uint64_t bloom_remaining_capacity(bloom *bf) {
     return bf->capacity > bf->num_elems ? bf->capacity - bf->num_elems : 0;
 }
 
-int bloom_add_elem(bloom *bf, uint8_t *data, uint64_t data_len) {
+int bloom_add(bloom *bf, uint8_t *data, uint64_t data_len) {
     if (!bf || !data || !data_len) {
         return -1;
     }
@@ -182,7 +182,7 @@ int bloom_add_elem(bloom *bf, uint8_t *data, uint64_t data_len) {
     return 0;
 }
 
-int bloom_test_elem(bloom *bf, uint8_t *data, uint64_t data_len) {
+int bloom_test(bloom *bf, uint8_t *data, uint64_t data_len) {
     if (!bf || !data || !data_len) {
         return -1;
     }
@@ -196,22 +196,6 @@ int bloom_test_elem(bloom *bf, uint8_t *data, uint64_t data_len) {
         }
     }
     return 0;
-}
-
-int bloom_lookup_constant_time(bloom *bf, uint8_t *data, uint64_t data_len) {
-    if (!bf || !data || !data_len) {
-        return -1;
-    }
-    uint64_t hash = XXH64(data, data_len, 0);
-
-    int result = 0;
-    for (uint64_t i = 0; i < bf->num_partitions; i++) {
-        uint64_t partition_bit = hash % bf->partition_lengths[i];
-        if (!(bf->partition_ptrs[i][partition_bit / 8] & 1 << partition_bit % 8)) {
-            result = 1;
-        }
-    }
-    return result;
 }
 
 bloom *bloom_alloc(double p, uint64_t n, uint8_t *bloom_data, uint64_t prefix_len) {
@@ -229,17 +213,13 @@ int bloom_init(bloom *bf, double p, uint64_t n, uint8_t *bloom_data, uint64_t pr
     if (!bf || p <= 0.0 || n <= 0) {
         return -1;
     }
-
-    double target_size = ceil((n * log(p)) / log(1.0 / (pow(2.0, log(2.0)))));
+    // ln (1 / (2^(ln 2))
+    static double ln1_div_2topowof_ln2 = -0.48045301391820149916611626395024359226226806640625;
+    double target_size = ceil((n * log(p)) / ln1_div_2topowof_ln2);
     uint64_t num_partitions = (uint64_t) ceil(log(2.0) * target_size / n);
     bf->partition_ptrs = calloc(num_partitions, sizeof *bf->partition_ptrs);
     bf->partition_lengths = calloc(num_partitions, sizeof(uint64_t));
     if (!bf->partition_ptrs || !bf->partition_lengths) {
-        return -1;
-    }
-
-    prime_table primes;
-    if (generate_primes(&primes, (target_size / num_partitions) + 300)) {
         return -1;
     }
 
@@ -254,6 +234,11 @@ int bloom_init(bloom *bf, double p, uint64_t n, uint8_t *bloom_data, uint64_t pr
         bf->base_ptr = bloom_data;
         bf->bloom_ptr = bf->base_ptr + bf->prefix_len;
         bf->alloced = false;
+    }
+
+    prime_table primes;
+    if (generate_primes(&primes, (target_size / num_partitions) + 300)) {
+        return -1;
     }
 
     int res = bloom_calc_partitions(bf, (long) target_size, num_partitions, &primes);
@@ -301,5 +286,12 @@ void bloom_clear(bloom *bf) {
 void bloom_free(bloom *bf) {
     bloom_clear(bf);
     free(bf);
+}
+
+uint8_t *bloom_get_filter(bloom *bf) {
+    return bf->bloom_ptr;
+}
+uint8_t *bloom_get_prefix(bloom *bf) {
+    return bf->base_ptr;
 }
 

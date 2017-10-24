@@ -1,5 +1,5 @@
-#ifndef BLOOM_FILTER_H
-#define BLOOM_FILTER_H
+#ifndef BLOOM_OHBF_H
+#define BLOOM_OHBF_H
 
 #include <stdio.h>
 #include <stdint.h>
@@ -31,14 +31,16 @@ void bloom_clear(bloom *bf);
 
 void bloom_free(bloom *bf);
 
-int bloom_add_elem(bloom *bf, uint8_t *data, uint64_t data_len);
+uint8_t *bloom_get_filter(bloom *bf);
 
-int bloom_test_elem(bloom *bf, uint8_t *data, uint64_t data_len);
+uint8_t *bloom_get_prefix(bloom *bf);
 
-int bloom_lookup_constant_time(bloom *bf, uint8_t *data, uint64_t data_len);
+int bloom_add(bloom *bf, uint8_t *data, uint64_t data_len);
+
+int bloom_test(bloom *bf, uint8_t *data, uint64_t data_len);
 
 void bloom_print(bloom *bf);
 
 uint64_t bloom_remaining_capacity(bloom *bf);
 
-#endif  // BLOOM_FILTER_H
+#endif  // BLOOM_OHBF_H
